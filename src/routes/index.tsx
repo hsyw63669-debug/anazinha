@@ -343,7 +343,7 @@ function ProfilePage() {
         video.pause();
       }
     });
-  },{rootMargin:"80px",threshold:0.15});
+  },{rootMargin:"300px",threshold:0.01});
   videos.forEach(v=>observer.observe(v));
   return()=>observer.disconnect();
 },[paidAccess]);
@@ -429,6 +429,7 @@ function ProfilePage() {
       {[1,2,3,4].map((item)=><button key={item} type="button" onClick={()=>{if(paidAccess){trackEvent("vip_content_clicked",{event_step:"play_vip_video",identifier:paidAccess.identifier,video:item});setActiveVipVideo(item)}else setModal("Escolha seu plano")}} aria-label={paidAccess?`Reproduzir vídeo VIP ${item}`:`Prévia VIP ${item}, conteúdo bloqueado`} className="group relative aspect-[.82] overflow-hidden rounded-2xl bg-[#e8ddd5] text-left shadow-sm">
        <video
          data-vip-preview
+         src={vipPreviewVideos[item-1]}
          data-src={vipPreviewVideos[item-1]}
          poster={bannerImage}
          aria-label={`Vídeo ${item} de Anazinha do Mal`}
@@ -436,7 +437,7 @@ function ProfilePage() {
          muted
          loop
          playsInline
-         preload="none"
+         preload="auto"
        />
        {!paidAccess && <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-black/30 via-black/35 to-black/45 text-center text-white">
         <span className="mb-2 flex h-12 w-12 items-center justify-center rounded-full border border-white/35 bg-black/25 shadow-lg backdrop-blur-[2px]">
