@@ -324,28 +324,29 @@ function ProfilePage() {
  const goForeignTelegram=()=>{trackEvent("foreign_telegram_notice_opened",{country:country||"unknown",event_step:"foreign_cta"});setTelegramNotice(true)};
  const goToCheckout=(plan:string)=>{trackEvent("subscription_clicked",{country:country||"BR",plan,event_step:"offer"});trackEvent("plan_selected",{country:country||"BR",plan,event_step:"offer"});if((country||"BR")!=="BR"){setModal(null);goForeignTelegram();return}setModal(null);setPaymentPlan(plan)};
  useEffect(()=>{
-  const videos=Array.from(document.querySelectorAll<HTMLVideoElement>("video"));
-  const startPlayback=()=>{
-    videos.forEach(video=>{
-      video.muted=true;
-      video.defaultMuted=true;
-      video.autoplay=true;
-      video.playsInline=true;
-      video.controls=false;
-      void video.play().catch(()=>{});
+  // Carrega e toca só os vídeos visíveis (evita 4 downloads pesados ao mesmo tempo)
+  const videos=Array.from(document.querySelectorAll<HTMLVideoElement>("video[data-vip-preview]"));
+  if(!videos.length)return;
+  const observer=new IntersectionObserver((entries)=>{
+    entries.forEach(entry=>{
+      const video=entry.target as HTMLVideoElement;
+      if(entry.isIntersecting){
+        if(!video.src && video.dataset.src){
+          video.src=video.dataset.src;
+          video.load();
+        }
+        video.muted=true;
+        video.defaultMuted=true;
+        video.playsInline=true;
+        void video.play().catch(()=>{});
+      }else{
+        video.pause();
+      }
     });
-  };
-  startPlayback();
-  const onReady=()=>startPlayback();
-  videos.forEach(video=>video.addEventListener("canplay",onReady));
-  document.addEventListener("visibilitychange",startPlayback);
-  window.addEventListener("pageshow",startPlayback);
-  return()=>{
-    videos.forEach(video=>video.removeEventListener("canplay",onReady));
-    document.removeEventListener("visibilitychange",startPlayback);
-    window.removeEventListener("pageshow",startPlayback);
-  };
-},[]);
+  },{rootMargin:"80px",threshold:0.15});
+  videos.forEach(v=>observer.observe(v));
+  return()=>observer.disconnect();
+},[paidAccess]);
  const goToGift=()=>{trackEvent("gift_clicked",{country:country||"BR",event_step:"offer"});if((country||"BR")!=="BR"){goForeignTelegram();return}setModal(null);setGiftCheckout(true)};
  const publishComment=()=>{if(!comment.trim())return;trackEvent("comment_submitted",{country:country||"BR"});setPostedComment(comment.trim());setComment("")};
  const openMedia=()=>{trackEvent("media_clicked",{country:country||"BR",event_step:"profile"});setActivePost(false);setActiveMedia(true);setTab("Todos");setTimeout(()=>document.getElementById("conteudo")?.scrollIntoView({behavior:"smooth",block:"start"}),50)};
@@ -426,7 +427,17 @@ function ProfilePage() {
      </div>
      <div className="grid grid-cols-2 gap-3">
       {[1,2,3,4].map((item)=><button key={item} type="button" onClick={()=>{if(paidAccess){trackEvent("vip_content_clicked",{event_step:"play_vip_video",identifier:paidAccess.identifier,video:item});setActiveVipVideo(item)}else setModal("Escolha seu plano")}} aria-label={paidAccess?`Reproduzir vídeo VIP ${item}`:`Prévia VIP ${item}, conteúdo bloqueado`} className="group relative aspect-[.82] overflow-hidden rounded-2xl bg-[#e8ddd5] text-left shadow-sm">
-       <video src={vipPreviewVideos[item-1]} aria-label={`Vídeo ${item} de Anazinha do Mal`} className={`absolute inset-0 h-full w-full object-cover ${paidAccess?"":"blur-[5px]"}`} autoPlay={!paidAccess} muted={!paidAccess} loop playsInline preload="metadata" />
+       <video
+         data-vip-preview
+         data-src={vipPreviewVideos[item-1]}
+         poster={bannerImage}
+         aria-label={`Vídeo ${item} de Anazinha do Mal`}
+         className={`absolute inset-0 h-full w-full object-cover ${paidAccess?"":"blur-[5px]"}`}
+         muted
+         loop
+         playsInline
+         preload="none"
+       />
        {!paidAccess && <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-black/30 via-black/35 to-black/45 text-center text-white">
         <span className="mb-2 flex h-12 w-12 items-center justify-center rounded-full border border-white/35 bg-black/25 shadow-lg backdrop-blur-[2px]">
          <Lock size={27} strokeWidth={1.9} className="drop-shadow-md" />
