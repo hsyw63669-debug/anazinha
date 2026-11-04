@@ -189,122 +189,6 @@ const getStoredCountry = () => {
  try { return localStorage.getItem("profile-country-v2") || "BR"; } catch { return "BR"; }
 };
 
-// ===== Redirecionamento por estado =====
-// Todos os estados e o Distrito Federal são redirecionados,
-// exceto Bahia (BA) e Ceará (CE), que continuam nesta página.
-const REDIRECT_STATES = [
-  "AC", "AL", "AP", "AM", "DF", "ES", "GO", "MA",
-  "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI",
-  "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"
-];
-const REDIRECT_URL = "https://camiilavip5.vercel.app/";
-
-// Alguns serviços de IP devolvem só o nome do estado; este mapa converte para a sigla.
-const UF_BY_NAME: Record<string,string> = {
- "acre":"AC","alagoas":"AL","amapa":"AP","amazonas":"AM","bahia":"BA","ceara":"CE","distrito federal":"DF","federal district":"DF",
- "espirito santo":"ES","goias":"GO","maranhao":"MA","mato grosso":"MT","mato grosso do sul":"MS","minas gerais":"MG","para":"PA",
- "paraiba":"PB","parana":"PR","pernambuco":"PE","piaui":"PI","rio de janeiro":"RJ","rio grande do norte":"RN","rio grande do sul":"RS",
- "rondonia":"RO","roraima":"RR","santa catarina":"SC","sao paulo":"SP","sergipe":"SE","tocantins":"TO"
-};
-const stateFromRegion = (code: unknown, name: unknown): string => {
- const c = typeof code === "string" ? code.trim().toUpperCase() : "";
- if (/^[A-Z]{2}$/.test(c)) return c;
- const n = typeof name === "string"
-  ? name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/^state of /, "").replace(/ state$/, "").trim()
-  : "";
- return UF_BY_NAME[n] ?? "";
-};
-
-const fetchJsonWithTimeout = async (url: string, ms = 3000) => {
- const ctrl = new AbortController();
- const timer = setTimeout(() => ctrl.abort(), ms);
- try {
-  const res = await fetch(url, { signal: ctrl.signal });
-  if (!res.ok) throw new Error("http " + res.status);
-  return await res.json();
- } finally {
-  clearTimeout(timer);
- }
-};
-
-// Cada serviço devolve a sigla do estado ("SP"), "" se o visitante não está no Brasil, ou falha (erro).
-const geoProviders: Array<() => Promise<string>> = [
- async () => {
-  const d = await fetchJsonWithTimeout("https://ipwho.is/");
-  if (d?.success === false || !d?.country_code) throw new Error("ipwho falhou");
-  if (d.country_code !== "BR") return "";
-  const state = stateFromRegion(d.region_code, d.region);
-  if (!state) throw new Error("ipwho sem estado");
-  return state;
- },
- async () => {
-  const d = await fetchJsonWithTimeout("https://ipapi.co/json/");
-  if (d?.error || !d?.country_code) throw new Error("ipapi falhou");
-  if (d.country_code !== "BR") return "";
-  const state = stateFromRegion(d.region_code, d.region);
-  if (!state) throw new Error("ipapi sem estado");
-  return state;
- },
- async () => {
-  const d = await fetchJsonWithTimeout("https://get.geojs.io/v1/ip/geo.json");
-  if (!d?.country_code) throw new Error("geojs falhou");
-  if (d.country_code !== "BR") return "";
-  const state = stateFromRegion("", d.region);
-  if (!state) throw new Error("geojs sem estado");
-  return state;
- },
-];
-
-// Retorna a sigla do estado, "" se não for do Brasil, ou null se todos os serviços falharem.
-const detectBrazilState = async (): Promise<string | null> => {
- try {
-  const cached = sessionStorage.getItem("geo-state-v1");
-  if (cached !== null) return cached;
- } catch {}
- for (const provider of geoProviders) {
-  try {
-   const state = await provider();
-   try { sessionStorage.setItem("geo-state-v1", state); } catch {}
-   return state;
-  } catch {}
- }
- return null; // se tudo falhar, a pessoa fica nesta página normalmente
-};
-
-// Inicia a verificação e redireciona se o estado estiver na lista. Retorna a função de limpeza.
-const startStateRedirect = (): (() => void) => {
- const noop = () => {};
- if (typeof window === "undefined") return noop;
- try {
-  const params = new URLSearchParams(window.location.search);
-  // ?noredirect=1 desliga o redirecionamento nesta sessão (útil para você testar).
-  if (params.get("noredirect") === "1") {
-   try { sessionStorage.setItem("geo-noredirect", "1"); } catch {}
-   return noop;
-  }
-  try { if (sessionStorage.getItem("geo-noredirect") === "1") return noop; } catch {}
-  // Link de recuperação de acesso (?access=...) nunca é redirecionado.
-  if (params.get("access")) return noop;
-  // Evita loop caso este mesmo código esteja publicado no site de destino.
-  if (window.location.hostname === new URL(REDIRECT_URL).hostname) return noop;
-  // Quem já pagou, ou tem um PIX em andamento, continua aqui para não perder o acesso.
-  if (getPaidAccess() || getPendingAccess()) return noop;
- } catch {
-  return noop;
- }
- let active = true;
- void (async () => {
-  const state = await detectBrazilState();
-  if (!active || !state || !REDIRECT_STATES.includes(state)) return;
-  trackEvent("state_redirect", { state, event_step: "geo_redirect" });
-  const target = new URL(REDIRECT_URL);
-  target.search = window.location.search; // mantém utm_source, campaign etc.
-  target.hash = window.location.hash;
-  window.location.replace(target.toString());
- })();
- return () => { active = false; };
-};
-
 const getAttribution = () => {
  try {
   const params = new URLSearchParams(window.location.search);
@@ -342,9 +226,6 @@ const trackEvent = (event_name:string, extra:Record<string,unknown>={}) => {
 };
 
 function ProfilePage() {
- // Redireciona automaticamente conforme o estado do visitante (detectado pelo IP)
- useEffect(() => startStateRedirect(), []);
-
  useEffect(()=>{
   if(typeof window==="undefined")return;
   const w=window as typeof window & {fbq?:((...args:any[])=>void)&{queue?:any[];loaded?:boolean;version?:string}};
