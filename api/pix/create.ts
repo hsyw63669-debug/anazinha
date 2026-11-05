@@ -6,6 +6,7 @@ const json = (res: VercelResponse, status: number, body: unknown) =>
 function text(value: unknown, max = 200): string {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") return json(res, 405, { error: "Método não permitido" });
@@ -17,7 +18,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return json(res, 400, { error: "Valor inválido. Informe um valor entre R$ 1,00 e R$ 100.000,00." });
   }
   const externalId = text(req.body?.idempotency_key, 120) || `michelle_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-  const description = text(req.body?.description, 120) || "Acesso exclusivo - Lurdes Souza";
+  const description = text(req.body?.description, 120) || "Acesso exclusivo - Anazinha do Mal";
   const baseUrl = (process.env.APP_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "")).replace(/\/$/, "");
   const payload = {
     amount: Number(amount.toFixed(2)),
@@ -28,31 +29,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   };
 
   try {
-    const upstream = await fetch(`${API_BASE}/api/pix/create`, {
-      method: "POST",
-      headers: { "x-api-key": apiKey, "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify(payload),
-    });
-    // DIAGNÓSTICO: lê o corpo como texto para nunca perder o motivo da recusa.
-    const raw = await upstream.text().catch(() => "");
+    // Tenta até 3 vezes (1 + 2 repetições) só quando o gateway está fora do ar (502/503/504).
+    let upstream: Response | null = null;
+    let raw = "";
+    for (let attempt = 0; attempt < 3; attempt++) {
+      upstream = await fetch(`${API_BASE}/api/pix/create`, {
+        method: "POST",
+        headers: { "x-api-key": apiKey, "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify(payload),
+      });
+      raw = await upstream.text().catch(() => "");
+      if (![502, 503, 504].includes(upstream.status)) break;
+      console.error("Gateway indisponível, tentativa " + (attempt + 1), { status: upstream.status });
+      if (attempt < 2) await sleep(1200);
+    }
     let result: any = {};
     try { result = raw ? JSON.parse(raw) : {}; } catch { result = {}; }
 
-    if (!upstream.ok || result?.success === false) {
-      // Aparece em Vercel > Logs. Não imprime a chave.
-      console.error("AtenasPay recusou", {
-        status: upstream.status,
-        body: raw.slice(0, 1500),
-        payload,
-        apiBase: API_BASE,
-      });
+    if (!upstream || !upstream.ok || result?.success === false) {
+      const status = upstream?.status || 502;
+      // Detalhe técnico só nos Logs da Vercel (o cliente não vê).
+      console.error("AtenasPay recusou", { status, body: raw.slice(0, 1500), apiBase: API_BASE });
+      if ([502, 503, 504].includes(status)) {
+        return json(res, 503, { error: "O pagamento está temporariamente indisponível. Aguarde um minuto e tente novamente." });
+      }
       const m = result?.message ?? result?.error?.message ?? result?.error ?? result?.detail;
       const message = typeof m === "string" && m ? m : "A AtenasPay recusou a cobrança Pix.";
-      return json(res, upstream.status || 502, {
-        error: message,
-        // Mostra na aba Network > create > Response (tire depois de resolver).
-        details: { upstream_status: upstream.status, upstream_body: raw.slice(0, 800), webhook_url: payload.webhook_url || null },
-      });
+      return json(res, status, { error: message, details: result?.details || result?.errors || undefined });
     }
 
     const transaction = result?.transaction ?? result?.data?.transaction ?? result?.data ?? result;
