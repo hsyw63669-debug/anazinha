@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
-const API_BASE = "https://nexuspag.com";
+const API_BASE = "https://tichupay.com";
 const json = (res: VercelResponse, status: number, body: unknown) =>
   res.status(status).setHeader("Content-Type", "application/json; charset=utf-8").json(body);
 function text(value: unknown, max = 200): string {
@@ -10,8 +10,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "POST") return json(res, 405, { error: "Método não permitido" });
-  const apiKey = process.env.ATENASPAY_API_KEY;
-  if (!apiKey) return json(res, 500, { error: "Configure ATENASPAY_API_KEY nas variáveis de ambiente da Vercel." });
+  const apiKey = process.env.TICHUPAY_API_KEY;
+  if (!apiKey) return json(res, 500, { error: "Configure TICHUPAY_API_KEY nas variáveis de ambiente da Vercel." });
 
   const amount = Number(req.body?.amount);
   if (!Number.isFinite(amount) || amount < 1 || amount > 100000) {
@@ -19,7 +19,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   const externalId = text(req.body?.idempotency_key, 120) || `michelle_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
   const description = text(req.body?.description, 120) || "Acesso exclusivo - Anazinha do Mal";
-  const baseUrl = (process.env.APP_BASE_URL || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "")).replace(/\/$/, "");
+  // Só envia webhook se APP_BASE_URL (endereço real do site) estiver configurada.
+  const baseUrl = (process.env.APP_BASE_URL || "").replace(/\/$/, "");
   const payload = {
     amount: Number(amount.toFixed(2)),
     description,
@@ -49,12 +50,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!upstream || !upstream.ok || result?.success === false) {
       const status = upstream?.status || 502;
       // Detalhe técnico só nos Logs da Vercel (o cliente não vê).
-      console.error("AtenasPay recusou", { status, body: raw.slice(0, 1500), apiBase: API_BASE });
+      console.error("TichuPay recusou", { status, body: raw.slice(0, 1500), apiBase: API_BASE });
       if ([502, 503, 504].includes(status)) {
         return json(res, 503, { error: "O pagamento está temporariamente indisponível. Aguarde um minuto e tente novamente." });
       }
       const m = result?.message ?? result?.error?.message ?? result?.error ?? result?.detail;
-      const message = typeof m === "string" && m ? m : "A AtenasPay recusou a cobrança Pix.";
+      const message = typeof m === "string" && m ? m : "A TichuPay recusou a cobrança Pix.";
       return json(res, status, { error: message, details: result?.details || result?.errors || undefined });
     }
 
@@ -64,8 +65,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let pixImage = text(transaction?.qr_code_base64, 100000);
     if (pixImage && !pixImage.startsWith("data:") && !pixImage.startsWith("http")) pixImage = `data:image/png;base64,${pixImage}`;
     if (!pixCode) {
-      console.error("Resposta inesperada da AtenasPay ao criar Pix", { keys: Object.keys(result || {}), transactionKeys: Object.keys(transaction || {}) });
-      return json(res, 502, { error: "A AtenasPay respondeu, mas não retornou o código Pix copia e cola." });
+      console.error("Resposta inesperada da TichuPay ao criar Pix", { keys: Object.keys(result || {}), transactionKeys: Object.keys(transaction || {}) });
+      return json(res, 502, { error: "A TichuPay respondeu, mas não retornou o código Pix copia e cola." });
     }
     return json(res, 200, {
       identifier,
@@ -74,7 +75,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       payment: { id: identifier, status: transaction?.status || "pending", expires_at: transaction?.expires_at },
     });
   } catch (error) {
-    console.error("Erro ao conectar à AtenasPay", error);
-    return json(res, 502, { error: "Não foi possível conectar à AtenasPay. Tente novamente em instantes." });
+    console.error("Erro ao conectar à TichuPay", error);
+    return json(res, 502, { error: "Não foi possível conectar à TichuPay. Tente novamente em instantes." });
   }
 }
